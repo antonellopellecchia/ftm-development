@@ -10,9 +10,10 @@ import pandas as pd
 import ROOT as rt
 from physlibs.root import root_style_ftm
 
-from ftm_analysis import femtoammeter
+import femtoammeter
 
 rt.gErrorIgnoreLevel = rt.kWarning
+rt.gROOT.SetBatch(rt.kTRUE)
 
 def main():
     ap = argparse.ArgumentParser(add_help=True)
