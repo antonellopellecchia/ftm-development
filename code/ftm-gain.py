@@ -14,12 +14,6 @@ from ftm_analysis import femtoammeter
 
 rt.gErrorIgnoreLevel = rt.kWarning
 
-'''def readCurrentFile(path):
-    with open(path) as f:
-        currentsStrList = f.read().split('\t')
-        currentsFloatList = [ float(s) for s in currentsStrList ]
-        return np.array(currentsFloatList)'''
-
 def main():
     ap = argparse.ArgumentParser(add_help=True)
     ap.add_argument('--source')
@@ -34,9 +28,7 @@ def main():
     ap.add_argument('--out', type=str)
     ap.add_argument('--label', type=str)
     ap.add_argument('--energy', type=float)
-    ap.add_argument('--gain', action='store_true')
-    ap.add_argument('--verbose', action='store_true')
-    ap.add_argument('-b', action='store_true', help='ROOT batch mode')
+    ap.add_argument('--extend', action='store_true')
     options = ap.parse_args(sys.argv[1:])
     optionsdict = dict(options._get_kwargs())
 
@@ -126,7 +118,10 @@ def main():
             parnames = [ 'drift', 'amplification', 'energy', 'source' ]
             scanVariable = 'amplification'
 
-            lowFieldCurrentScans[electrode] = femtoammeter.CurrentScan.FromDirectory(directory, pattern, parnames, scanVariable)
+            try: lowFieldCurrentScans[electrode] = femtoammeter.CurrentScan.FromDirectory(directory, pattern, parnames, scanVariable)
+            except FileNotFoundError:
+                print(f'{directory} not found, skipping...')
+                break
             if electrode == 'drift':
                 driftOffset = lowFieldCurrentScans[electrode].GetParameter('DRIFT') * driftGap * 1e3
                 lowFieldCurrentScans[electrode].SetOffsetx(-driftOffset)
@@ -138,30 +133,33 @@ def main():
             electrodeCurrentGraph.GetYaxis().SetTitleOffset(1.6)
             electrodeCurrentGraph.Draw('ap')
 
-            if electrode in ['ground', 'anode']:
-                color = rt.kRed*(electrode=='ground')+rt.kBlue*(electrode=='anode')+2
-                if electrode=='ground': x1,y1,x2,y2 = 0.2,0.15,0.5,0.35
-                if electrode=='anode': x1,y1,x2,y2 = 0.2,0.7,0.5,0.9
+            color = {'ground':rt.kRed,'anode':rt.kBlue,'drift':rt.kGreen}[electrode]+2
+            if electrode=='ground': x1,y1,x2,y2 = 0.2,0.15,0.5,0.35
+            if electrode in ['anode','drift']: x1,y1,x2,y2 = 0.2,0.7,0.5,0.9
 
-                fit = rt.TF1('f', '[0]+[1]*exp([2]*x)', 10, 250)
-                fit.SetParNames('i_{0}', 'k', '#alpha')
-                fit.SetParameters(-0.002, -0.01, 0.1)
-                fit.SetLineColor(color)
-                electrodeCurrentGraph.Fit(fit, 'R')
+            fit = rt.TF1('f', '[0]+[1]*exp([2]*x)', 10, 320)
+            fit.SetParNames('i_{0}', 'k', '#alpha')
+            fit.SetParameters(-0.002, -0.01, 0.1)
+            fit.SetLineColor(color)
+            electrodeCurrentGraph.Fit(fit, 'R')
 
-                electrodeCurrentCanvas.Update()
-                electrodeCurrentCanvas.Draw()
-                fitBox = electrodeCurrentGraph.FindObject('stats')
-                fitBox.SetTextColor(color)
-                fitBox.SetLineColor(color)
-                fitBox.SetFillColor(0)
-                fitBox.SetFillStyle(1001)
-                fitBox.SetBorderSize(1)
-                fitBox.SetX1NDC(x1)
-                fitBox.SetY1NDC(y1)
-                fitBox.SetX2NDC(x2)
-                fitBox.SetY2NDC(y2)
+            electrodeCurrentCanvas.Update()
+            electrodeCurrentCanvas.Draw()
+            fitBox = electrodeCurrentGraph.FindObject('stats')
+            fitBox.SetTextColor(color)
+            fitBox.SetLineColor(color)
+            fitBox.SetFillColor(0)
+            fitBox.SetFillStyle(1001)
+            fitBox.SetBorderSize(1)
+            fitBox.SetX1NDC(x1)
+            fitBox.SetY1NDC(y1)
+            fitBox.SetX2NDC(x2)
+            fitBox.SetY2NDC(y2)
                 
+            ''' Primary current can be calculated either from drift
+            or from anode+ground. Using anode+ground here'''
+            #if electrode in ['drift']:
+            if electrode in ['ground', 'anode']:
                 primaryCurrent += fit.GetParameter(0)
                 primaryCurrentError2 += fit.GetParError(0)**2
 
@@ -188,20 +186,44 @@ def main():
             vampl = float(current.parameters['amplification'])
             gain = current.mean/primaryCurrentExtrapolated
             gainError = gain * ((current.error/current.mean)**2 + primaryCurrentErrorExtrapolatedRelative**2)**0.5
+            #print(vampl, gain)
             gainPlot.SetPoint(i, vampl, gain)
             gainPlot.SetPointError(i, 0, gainError)
+
+        print('')
+        if options.extend: # use low field scan to extend gain plot
+            lowFieldGroundCurrentScan = lowFieldCurrentScans['ground']
+            conversion = -lowFieldGroundCurrentScan[-1].mean/primaryCurrent/gainPlot.Eval(lowFieldGroundCurrentScan.xvalues[-1])
+            for i,current in enumerate(lowFieldGroundCurrentScan):
+                vampl = float(current.parameters['amplification'])
+                try: groundCurrentScan.Get(vampl)
+                except ValueError:
+                    gain = -current.mean/primaryCurrent
+                    gain /= conversion
+                    gainError = gain * ((current.error/current.mean)**2 + (primaryCurrentError/primaryCurrent)**2)**0.5
+                    gainPlot.SetPoint(gainPlot.GetN(), vampl, gain)
+                    gainPlot.SetPointError(gainPlot.GetN()-1, 0, gainError)
+
+        print('')
+        #for ip in range(gainPlot.GetN()):
+        #    print(gainPlot.GetPointX(ip), gainPlot.GetPointY(ip))
 
         gainCanvas = rt.TCanvas('GainCanvas', '', 800, 600)
         gainPlot.SetTitle(';Amplification voltage (V);Effective gas gain')
         gainPlot.GetYaxis().SetTitleOffset(1.5)
-        gainPlot.GetYaxis().SetRangeUser(0.1, 1e3)
+        gainPlot.GetYaxis().SetRangeUser(1e-2, 5e4)
         color = rt.kRed+2
         gainPlot.SetLineColor(color)
         gainPlot.SetMarkerStyle(24)
         gainPlot.Draw('AP')
 
         #fit = rt.TF1('f', 'expo(0)+pol1(2)', 20, 500)
-        fit = rt.TF1('f', 'expo(0)', 300, 600)
+        fit = rt.TF1('f', 'expo(0)*(x<[2])+expo(3)*(x>[2])', 10, 450)
+        fit = rt.TF1('f', 'expo(0)', 10, 450)
+        #fit = rt.TF1('f', 'pol1(0)', 10, 450)
+        #fit = rt.TF1('f', 'pol1(0)', 10, 100)
+        #fit.SetParameters(1, 0.02, 200, -1, 0.2)
+        #fit.FixParameter(2, 100)
         fit.SetParNames('a', 'b', '#alpha', '#beta')
         fit.SetLineColor(color)
         gainPlot.Fit(fit, 'R')
@@ -216,7 +238,7 @@ def main():
         fitBox.SetFillColor(0)
         fitBox.SetFillStyle(1001)
         fitBox.SetBorderSize(1)
-        x1,y1,x2,y2 = 0.2,0.7,0.5,0.9
+        x1,y1,x2,y2 = 0.6,0.15,0.9,0.3
         fitBox.SetX1NDC(x1)
         fitBox.SetY1NDC(y1)
         fitBox.SetX2NDC(x2)
@@ -226,14 +248,29 @@ def main():
         gainCanvas.SetGrid()
         root_style_ftm.labelFtm(gainCanvas)
         if options.label: root_style_ftm.labelRight(gainCanvas, options.label)
-
-        legend = rt.TLegend(0.6, 0.15, 0.9, 0.28)
-        legend.SetTextSize(0.033)
-        legend.SetBorderSize(1)
-        try: mixture = str(groundCurrentScan.GetParameter('GAS')[0])
-        except AttributeError: mixture = 'Ar:CO_{2} 70:30'
-        legend.AddEntry(gainPlot, mixture, 'p')
-        legend.Draw()        
+        
+        infoText = rt.TPaveText(0.19, 0.73, 0.49, 0.91, 'BL NDC')
+        #infoText.SetTextAlign(13)
+        infoText.SetBorderSize(1)
+        infoText.SetTextSize(.03)
+        
+        try:
+            foilType = groundCurrentScan.GetParameter('FOIL')[0]
+            infoText.AddText(f'{foilType} foil')
+        except KeyError: pass
+        try:
+            mixture = str(groundCurrentScan.GetParameter('GAS')[0])
+            infoText.AddText(f'Gas mixture {mixture}')
+        except KeyError: pass
+        try:
+            driftField = groundCurrentScan.GetParameter('DRIFT')
+            infoText.AddText(f'Drift field {driftField} kV/cm')
+        except KeyError: pass
+        try:
+            sourceType = groundCurrentScan.GetParameter('SOURCE')[0]
+            infoText.AddText(f'{sourceType} source')
+        except KeyError: pass
+        infoText.Draw()
 
         gainPlot.SaveAs('%s/Gain.root'%(options.out))
         gainCanvas.SaveAs('%s/Gain.eps'%(options.out))

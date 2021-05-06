@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 
 import ROOT as rt
+rt.gROOT.SetBatch(rt.kTRUE)
 from physlibs.root import root_style_ftm
 
 def main():
@@ -16,10 +17,12 @@ def main():
     ap.add_argument('--names', nargs='+')
     ap.add_argument('--legend', nargs='+')
     ap.add_argument('--colors', nargs='+')
+    ap.add_argument('--lines', nargs='+', type=int)
     ap.add_argument('--out', type=str)
     ap.add_argument('--label', type=str)
-    ap.add_argument('--verbose', action='store_true')
-    ap.add_argument('-b', action='store_true', help='ROOT batch mode')
+    ap.add_argument('--wide', action='store_true')
+    ap.add_argument('--noparams', action='store_true')
+    ap.add_argument('--refit', action='store_true')
     options = ap.parse_args(sys.argv[1:])
 
     try: os.makedirs(options.out)
@@ -35,10 +38,16 @@ def main():
             if g.GetPointX(jp)<200: g.RemovePoint(jp)
             else: jp += 1
         g.SetName(options.names[i])
+
+        if options.refit:
+            # fit plot again; otherwise, use fit function in root file
+            fit = rt.TF1('f', 'expo(0)', 300, 500)
+            g.Fit('f', 'R')
         #g.GetFunction('f').Delete()
         gainMultiGraph.Add(g, 'p')
 
-    gainCanvas = rt.TCanvas('GainCanvas', '', 800, 600)
+    if options.wide: gainCanvas = rt.TCanvas('GainCanvas', '', 1000, 600)
+    else: gainCanvas = rt.TCanvas('GainCanvas', '', 800, 600)
     gainCanvas.SetLogy()
     gainCanvas.SetGrid()
 
@@ -48,7 +57,10 @@ def main():
 
     #gainCanvas.Update()
     #gainCanvas.Draw()
-    legend = rt.TLegend(0.19, 0.73, 0.5, 0.91)
+    if options.wide:
+        legend = rt.TLegend(0.49, 0.13, 0.9, 0.31)
+        legend.SetNColumns(2)
+    else: legend = rt.TLegend(0.19, 0.73, 0.5, 0.91)
     legend.SetTextSize(0.032)
     legend.SetBorderSize(1)
     rtcolors = list()
@@ -57,24 +69,31 @@ def main():
     #x1,y1,x2,y2 = 0.19,0.93,0.46,1.03
     x1,y1,x2,y2 = 0.65,0.03,0.93,0.14
     for i,g in enumerate(gainGraphs):
-        legend.AddEntry(g, options.legend[i], 'p')
+        legend.AddEntry(g, options.legend[i], 'pl')
         y1 += 0.13
         y2 += 0.13
         g.SetMarkerColor(rtcolors[i])
+        g.SetLineColor(rtcolors[i])
         g.SetMarkerStyle(24)
-        g.SetLineColor(rt.kBlack)
         g.GetFunction('f').SetLineColor(rtcolors[i])
+        if options.lines:
+            g.GetFunction('f').SetLineStyle(options.lines[i])
+            g.SetLineStyle(options.lines[i])
         fitBox = g.FindObject('stats')
-        fitBox.SetTextSize(0.025)
-        fitBox.SetTextColor(rtcolors[i])
-        fitBox.SetLineColor(rtcolors[i])
-        fitBox.SetFillColor(0)
-        fitBox.SetFillStyle(1001)
-        fitBox.SetBorderSize(1)
-        fitBox.SetX1NDC(x1)
-        fitBox.SetY1NDC(y1)
-        fitBox.SetX2NDC(x2)
-        fitBox.SetY2NDC(y2)
+        if options.noparams:
+            fitBox.Delete()
+            rt.gStyle.SetOptFit(0)
+        else:
+            fitBox.SetTextSize(0.025)
+            fitBox.SetTextColor(rtcolors[i])
+            fitBox.SetLineColor(rtcolors[i])
+            fitBox.SetFillColor(0)
+            fitBox.SetFillStyle(1001)
+            fitBox.SetBorderSize(1)
+            fitBox.SetX1NDC(x1)
+            fitBox.SetY1NDC(y1)
+            fitBox.SetX2NDC(x2)
+            fitBox.SetY2NDC(y2)
     legend.Draw()
 
     root_style_ftm.labelFtm(gainCanvas)
