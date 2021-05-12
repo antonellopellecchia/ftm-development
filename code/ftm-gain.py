@@ -212,7 +212,7 @@ def main():
         gainCanvas = rt.TCanvas('GainCanvas', '', 800, 600)
         gainPlot.SetTitle(';Amplification voltage (V);Effective gas gain')
         gainPlot.GetYaxis().SetTitleOffset(1.5)
-        gainPlot.GetYaxis().SetRangeUser(1e-2, 5e4)
+        gainPlot.GetYaxis().SetRangeUser(1, 1e4)
         color = rt.kRed+2
         gainPlot.SetLineColor(color)
         gainPlot.SetMarkerStyle(24)
@@ -250,7 +250,7 @@ def main():
         root_style_ftm.labelFtm(gainCanvas)
         if options.label: root_style_ftm.labelRight(gainCanvas, options.label)
         
-        infoText = rt.TPaveText(0.19, 0.73, 0.49, 0.91, 'BL NDC')
+        infoText = rt.TPaveText(0.19, 0.73, 0.53, 0.91, 'BL NDC')
         #infoText.SetTextAlign(13)
         infoText.SetBorderSize(1)
         infoText.SetTextSize(.03)

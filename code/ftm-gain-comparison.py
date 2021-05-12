@@ -46,20 +46,24 @@ def main():
         #g.GetFunction('f').Delete()
         gainMultiGraph.Add(g, 'p')
 
-    if options.wide: gainCanvas = rt.TCanvas('GainCanvas', '', 1000, 600)
+    if options.wide: gainCanvas = rt.TCanvas('GainCanvas', '', 1200, 600)
     else: gainCanvas = rt.TCanvas('GainCanvas', '', 800, 600)
     gainCanvas.SetLogy()
     gainCanvas.SetGrid()
 
     gainMultiGraph.SetTitle(';Amplification voltage (V);Effective gain')
     gainMultiGraph.Draw('a')
-    #gainMultiGraph.GetXaxis().SetRange(200, 400)
+    gainMultiGraph.GetYaxis().SetRangeUser(4e-1, 4e4)
+    gainMultiGraph.GetYaxis().SetTitleOffset(.9)
 
     #gainCanvas.Update()
     #gainCanvas.Draw()
     if options.wide:
-        legend = rt.TLegend(0.49, 0.13, 0.9, 0.31)
-        legend.SetNColumns(2)
+        '''legend = rt.TLegend(0.49, 0.13, 0.9, 0.31)
+        legend.SetNColumns(2)'''
+        legend = rt.TLegend(0.76, 0.2, .96, 0.935)
+        gainCanvas.SetRightMargin(.25)
+        gainCanvas.SetLeftMargin(.085)
     else: legend = rt.TLegend(0.19, 0.73, 0.5, 0.91)
     legend.SetTextSize(0.032)
     legend.SetBorderSize(1)
@@ -95,9 +99,9 @@ def main():
             fitBox.SetX2NDC(x2)
             fitBox.SetY2NDC(y2)
     legend.Draw()
-
-    root_style_ftm.labelFtm(gainCanvas)
-    if options.label: root_style_ftm.labelRight(gainCanvas, options.label)
+    
+    root_style_ftm.labelFtm(gainCanvas, .085, .97)
+    if options.label: root_style_ftm.labelRight(gainCanvas, options.label, .75, .97)
 
     gainMultiGraph.SaveAs('%s/GainComparison.root'%(options.out))
     gainCanvas.SaveAs('%s/GainComparison.eps'%(options.out))
