@@ -8,7 +8,8 @@ import numpy as np
 import pandas as pd
 
 import ROOT as rt
-from physlibs.root import root_style_ftm
+from physlibs.root import root_style_ftm as root_style
+#import rootstyleftm as root_style
 
 import femtoammeter
 
@@ -74,8 +75,8 @@ def main():
         powerScanGraph.Fit(powerScanFit)
         powerScanExponent = powerScanFit.GetParameter(1)
 
-        root_style_ftm.labelFtm(powerScanCanvas)
-        if options.label: root_style_ftm.labelRight(powerScanCanvas, options.label)
+        #root_style.labelFtm(powerScanCanvas)
+        #if options.label: root_style.labelRight(powerScanCanvas, options.label)
         powerScanCanvas.SetGrid()
         powerScanCanvas.SaveAs(f'{options.out}/PowerScan.eps')
 
@@ -99,8 +100,8 @@ def main():
         groundCurrentGraph.GetYaxis().SetTitleOffset(1.6)
         groundCurrentGraph.Draw('ap')
 
-        root_style_ftm.labelFtm(groundCurrentCanvas)
-        if options.label: root_style_ftm.labelRight(groundCurrentCanvas, options.label)
+        #root_style.labelFtm(groundCurrentCanvas)
+        #if options.label: root_style.labelRight(groundCurrentCanvas, options.label)
 
         groundCurrentCanvas.SetGrid()
         groundCurrentCanvas.SetLogy()
@@ -164,8 +165,8 @@ def main():
                 primaryCurrent += fit.GetParameter(0)
                 primaryCurrentError2 += fit.GetParError(0)**2
 
-            root_style_ftm.labelFtm(electrodeCurrentCanvas)
-            if options.label: root_style_ftm.labelRight(electrodeCurrentCanvas, options.label)
+            #root_style.labelFtm(electrodeCurrentCanvas)
+            #if options.label: root_style.labelRight(electrodeCurrentCanvas, options.label)
 
             electrodeCurrentCanvas.SetGrid()
             electrodeCurrentCanvas.SaveAs(f'{options.out}/LowField{electrode.capitalize()}Current.eps')
@@ -247,8 +248,8 @@ def main():
 
         gainCanvas.SetLogy()
         gainCanvas.SetGrid()
-        root_style_ftm.labelFtm(gainCanvas)
-        if options.label: root_style_ftm.labelRight(gainCanvas, options.label)
+        #root_style.labelFtm(gainCanvas)
+        #if options.label: root_style.labelRight(gainCanvas, options.label)
         
         infoText = rt.TPaveText(0.19, 0.73, 0.53, 0.91, 'BL NDC')
         #infoText.SetTextAlign(13)

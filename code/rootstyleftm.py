@@ -117,6 +117,7 @@ def getStyle():
     
     return style
 
+style = rt.TStyle("FTM", "FTMStyle")
 style = getStyle()
 style.cd()
 rt.gROOT.SetStyle("FTM")
