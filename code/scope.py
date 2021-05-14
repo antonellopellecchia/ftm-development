@@ -9,8 +9,9 @@ import numpy as np
 import pandas as pd
 from scipy import fftpack
 from scipy import signal
+from tqdm import tqdm
 
-from physlibs.root import root_style
+#from physlibs.root import root_style_ftm as root_style
 from physlibs.root import functions
 
 class ScopeData:
@@ -77,7 +78,7 @@ class ScopeSignal:
 
     def ReadSignal(self):
         if self.scopeData is not None: return self.scopeData
-        self.scopeData = lecroyparser.ScopeData(self.scopeFile)
+        self.scopeData = lecroyparser.ScopeData(self.scopeFile, sparse = 10000)
         self.x *= 1e9
         self.y *= 1e3
         if self.negative: self.y *= -1
@@ -110,6 +111,9 @@ class ScopeSignal:
         signalGraph = rt.TGraph(len(x), array('f', x), array('f', y))
         signalGraph.SetTitle(';Time (ns);Amplitude (mV)')
         return signalGraph
+
+    def GetNoiseList(self, tmax=-5): # return list with points before tmax
+        return self.x[self.x<tmax]
 
     def GetNoiseHisto(self, tmax):
         if self.noiseHisto: return self.noiseHisto
@@ -298,11 +302,13 @@ class ScopeSignal:
         if edge=='negative': return (0.9*self.GetAmplitudeMin()-0.1*self.GetAmplitudeMin())/fit.GetParameter(1)
         else: return (0.9*self.GetAmplitudeMax()-0.1*self.GetAmplitudeMin())/fit.GetParameter(1)
 
-    def GetSigmaNoise(self, tmax):
-        return self.GetNoiseHisto(tmax).GetRMS()
+    def GetSigmaNoise(self, tmax=-5):
+        #return self.GetNoiseHisto(tmax).GetRMS()
+        return self.GetNoiseList(tmax).std()
 
     def GetBaseline(self, tmax=-5):
-        return self.GetNoiseHisto(tmax).GetMean()
+        #return self.GetNoiseHisto(tmax).GetMean()
+        return self.GetNoiseList(tmax).mean()
 
     def GetAmplitudeMax(self):
         return max(self.y)
@@ -428,15 +434,18 @@ class ScopeSignal:
 
 class ScopeEvent:
     # stores one or more signals at a single trigger
-    def __init__(self, charge=None, overThreshold=None):
+    def __init__(self, charge=None, amplitude=None, overThreshold=None, preamplifier=None):
         if charge is not None: self._detectorCharge = charge
         if overThreshold is not None: self._isOverThreshold = overThreshold
+        if amplitude is not None: self._detectorAmplitude = amplitude
+        self.preamplifier = preamplifier
 
-    def FromSignals(signals, triggerSignals, detectorSignals):
+    def FromSignals(signals, triggerSignals, detectorSignals, threshold):
         event = ScopeEvent()
         event.signals = signals # list of signals, both trigger and detector
         event.triggerSignals = triggerSignals # index of trigger signals in event list
         event.detectorSignals = detectorSignals  # index of detector signals in event list
+        event.threshold = threshold
         return event
 
     def __repr__(self):
@@ -462,13 +471,25 @@ class ScopeEvent:
         return self._detectorCharge
 
     @property
+    def collectedCharge(self):
+        if self.preamplifier: return self.detectorAmplitude/self.preamplifier
+        else: return self.detectorCharge
+
+    @property
+    def detectorAmplitude(self):
+        try: return self._detectorAmplitude
+        except AttributeError: pass
+        self._detectorAmplitude = self.detectorSignal.GetAmplitudeMax()
+        return self._detectorAmplitude
+
+    @property
     def isOverThreshold(self):
         try: return self._isOverThreshold
         except AttributeError: pass
         self._isOverThreshold = self.detectorSignal.GetAmplitudeMax()>self.threshold
         return self._isOverThreshold
 
-    def SaveAs(self, fname, threshold=None):
+    def SaveAs(self, fname):
         # plot trigger and detector signals side to side
         signalCanvas = rt.TCanvas('signalCanvas'+self.name, '', 1200, 600)
         signalCanvas.Divide(2,1)
@@ -483,11 +504,15 @@ class ScopeEvent:
                 #print('Processing signal', j)
             multiGraphs[i].Draw('a')
 
-        if threshold:
-            line = rt.TLine(-200, threshold, 200, threshold)
-            line.SetLineColor(rt.kRed)
-            line.SetLineStyle(2)
-            line.Draw()
+        line = rt.TLine(-200, self.threshold, 200, self.threshold)
+        line.SetLineColor(rt.kRed)
+        line.SetLineStyle(2)
+        line.Draw()
+
+        latex = rt.TLatex()
+        latex.SetTextSize(0.03)
+        latex.DrawLatexNDC(.18, .85, f'Amplitude {self.detectorAmplitude:1.2f} mV')
+        latex.DrawLatexNDC(.18, .8, f'Charge {self.detectorCharge:1.2f} pC')
 
         '''signalCanvas.cd(1)
         self.signals[0].graph.Draw('AL')
@@ -510,6 +535,9 @@ class DataTaking:
     def FromDirectory(path, setup, chtrigger, chdetector, negative):
         signalsTrigger = list()
         signalsDetector = list()
+        
+        threshold = float(setup['THRESHOLD'])
+
         files = sorted(os.listdir(path))
         for f in files:
             fileNameMatch = re.match(r'C(\d)--Trace--(\d+).trc', f)
@@ -536,16 +564,21 @@ class DataTaking:
 
         scopeEvents = list()
         for signalTrigger,signalDetector in zip(signalsTrigger, signalsDetector):
-            scopeEvents.append(ScopeEvent.FromSignals([signalTrigger,signalDetector], [0], [1]))
-        return DataTaking(scopeEvents, setup)
+            scopeEvents.append(ScopeEvent.FromSignals([signalTrigger,signalDetector], [0], [1], threshold))
+        dataTaking = DataTaking(scopeEvents, setup)
+        return dataTaking
 
     def FromNtuples(path, setup):
         #rootFile = rt.TFile(path)
         treeDf = rt.RDataFrame('DataTakingTree', path)
         eventTree = treeDf.AsNumpy()
         scopeEvents = list()
-        for charge,overThreshold in zip(eventTree['detectorCharge'],eventTree['isOverThreshold']):
-            scopeEvents.append(ScopeEvent(charge,overThreshold))
+
+        if setup['READOUT']=='ortec': preamplifier = 4 # Ortec sensitivity in mV/fC
+        else: preamplifier = None
+        
+        for charge,amplitude,overThreshold in zip(eventTree['detectorCharge'],eventTree['detectorAmplitude'],eventTree['isOverThreshold']):
+            scopeEvents.append(ScopeEvent(charge,amplitude,overThreshold,preamplifier))
         return DataTaking(scopeEvents, setup)
     
     def __iter__(self):
@@ -561,7 +594,7 @@ class DataTaking:
     def name(self):
         return '_'.join(self.setup.values())
 
-    def ToNtuples(self, path, threshold, events=-1):
+    def ToNtuples(self, path, events=-1):
         rootFile = rt.TFile(path, 'RECREATE')
         tree = rt.TTree('DataTakingTree', '')
         
@@ -569,10 +602,12 @@ class DataTaking:
         tree.Branch('detectorCharge', detectorCharge, 'detectorCharge/D')
         isOverThreshold = np.zeros(1, dtype=float)
         tree.Branch('isOverThreshold', isOverThreshold, 'isOverThreshold/D')
+        detectorAmplitude = np.zeros(1, dtype=float)
+        tree.Branch('detectorAmplitude', detectorAmplitude, 'detectorAmplitude/D')
 
-        for event in self.scopeEvents[:events]:
-            event.threshold = threshold
+        for event in tqdm(self.scopeEvents[:events]):
             detectorCharge[0] = event.detectorCharge
+            detectorAmplitude[0] = event.detectorAmplitude
             isOverThreshold[0] = event.isOverThreshold
             #print(event.isOverThreshold)
             tree.Fill()
@@ -580,7 +615,7 @@ class DataTaking:
         rootFile.Write()
         rootFile.Close()
 
-    def GetEfficiency(self, threshold):
+    def GetEfficiency(self):
         try: return self._efficiency
         except AttributeError: pass
         nevents = len(self)
@@ -590,11 +625,14 @@ class DataTaking:
         self._efficiency = nsignals/nevents
         return self._efficiency
 
-    def DrawWaveforms(self, path, nevents=None, threshold=None):
+    def GetAverageCharge(self):
+        return np.array([event.collectedCharge for event in self.scopeEvents]).mean()
+
+    def DrawWaveforms(self, path, nevents=None):
         if nevents is None: nevents=len(self.scopeEvents)
         for scopeEvent in self.scopeEvents[:nevents]:
             #print(scopeEvent)
-            scopeEvent.SaveAs(f'{path}/{scopeEvent.name}.png', threshold)
+            scopeEvent.SaveAs(f'{path}/{scopeEvent.name}.png')
 
 
 class Measurement:
@@ -615,6 +653,7 @@ class Measurement:
         dataTakings = list()
         for d in subfolders:
             dataTakingSetup = {key:arg for (key,arg) in zip(parameters,d.split('_'))}
+            dataTakingSetup.update(measurementSetup)
             dataTakings.append(DataTaking.FromDirectory(f'{path}/{d}', dataTakingSetup, chtrigger, chdetector, negative))
         return Measurement(dataTakings, measurementSetup)
 
@@ -623,48 +662,33 @@ class Measurement:
         rootFiles = sorted(os.listdir(path))
         rootFiles = [f for f in rootFiles if f[-5:]=='.root']
 
+        setupFile = f'{path}/setup.txt'
+        measurementSetupDict = pd.read_csv(setupFile, sep='\t').to_dict()
+        measurementSetup = {key:arg[0] for (key,arg) in measurementSetupDict.items()}
+
         dataTakings = list()
         for rootFile in rootFiles:
             dataTakingSetup = {key:arg for (key,arg) in zip(parameters,rootFile[:-5].split('_'))}
+            dataTakingSetup.update(measurementSetup)
             dataTakings.append(DataTaking.FromNtuples(f'{path}/{rootFile}', dataTakingSetup))
-        return Measurement(dataTakings, None)
+        return Measurement(dataTakings, measurementSetup)
 
-    def ToNtuples(self, path, threshold, events=-1):
+    def ToNtuples(self, path, events=-1):
         for i,dataTaking in enumerate(self):
-            print(dataTaking)
-            dataTaking.ToNtuples(f'{path}/{dataTaking.name}.root', threshold, events)
+            print('Point', i, dataTaking)
+            dataTaking.ToNtuples(f'{path}/{dataTaking.name}.root', events)
     
     def __iter__(self):
         return self.dataTakings.__iter__()
     
-    def GetEfficiencyPlot(self, threshold):
+    def GetEfficiencyPlot(self):
         efficiencyPlot = rt.TGraphErrors()
-        for i,dataTaking in enumerate(self):
-            print(dataTaking)
-            efficiencyPlot.SetPoint(i, float(dataTaking.setup['power']), dataTaking.GetEfficiency(threshold))
-        efficiencyPlot.SetTitle(';Laser power (#muJ);FTM efficiency')
+        opticalDensity = float(self.setup['OD'])
+        for i,dataTaking in tqdm(enumerate(self)):
+            laserPower = float(dataTaking.setup['power'])*51/100*10**(-opticalDensity)
+            averageCharge = dataTaking.GetAverageCharge()
+            #efficiencyPlot.SetPoint(i, laserPower, dataTaking.GetEfficiency())
+            efficiencyPlot.SetPoint(i, dataTaking.GetAverageCharge(), dataTaking.GetEfficiency())
+        efficiencyPlot.SetTitle(';Collected charge (pC);Efficiency')
+
         return efficiencyPlot
-    
-'''class ScopeSignalSet:
-    def __init__(self, signalDirectory):
-        self.signalDirectory = signalDirectory
-    
-    def GetSignals(self, pattern, labels):
-        scopeFiles = sorted(os.listdir(self.signalDirectory))
-        scopeSignals = list()
-        skipped = list()
-        for scopeFile in scopeFiles:
-            scopeFilePath = self.signalDirectory+'/'+scopeFile
-            attributes = dict()
-            m = re.match(pattern, scopeFile)
-            if not m:
-                skipped.append(scopeFile)
-                continue
-            for i,attr in enumerate(m.groups()):
-                attributes[labels[i]] = attr
-            scopeSignal = ScopeSignal(scopeFilePath)
-            scopeSignal.SetAttributes(attributes)
-            scopeSignals.append(scopeSignal)
-        self.scopeSignals = scopeSignals
-        self.skipped = skipped
-        return scopeSignals, skipped'''

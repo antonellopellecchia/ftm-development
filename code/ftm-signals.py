@@ -9,7 +9,7 @@ import time, datetime
 import re
 
 import scope
-from physlibs.root import root_style_ftm
+from physlibs.root import root_style_ftm as root_style
 from physlibs.root import functions
 
 rt.gROOT.SetBatch(rt.kTRUE)
@@ -40,7 +40,7 @@ def main():
     negative = polarity=='negative'
 
     parameters = ['drift', 'anode', 'power']
-    threshold = 0.7
+    #threshold = 0.7
 
     if options.inputFormat=='raw':
         print('Input is raw...')
@@ -50,16 +50,47 @@ def main():
 
     if options.outputFormat=='ntuples':
         print('Converting to ntuples...')
-        scopeMeasurement.ToNtuples(options.output, threshold, options.events)
+        scopeMeasurement.ToNtuples(options.output, options.events)
     elif options.outputFormat=='draw':
         for scopeDataTaking in scopeMeasurement:
             print('Processing', scopeDataTaking)
-            scopeDataTaking.DrawWaveforms(f'{options.output}/{scopeDataTaking.name}', nevents=options.events, threshold=threshold)
+            scopeDataTaking.DrawWaveforms(f'{options.output}/{scopeDataTaking.name}', nevents=options.events)
     elif options.outputFormat=='results':
         print('Saving efficiency plot...')
+        efficiencyPlot = scopeMeasurement.GetEfficiencyPlot()
+
+        xmin, xmax = efficiencyPlot.GetXaxis().GetXmin(), efficiencyPlot.GetXaxis().GetXmax()
+        efficiencySigmoid = functions.GetSigmoid(xmin, xmax, 1, 1, 0.5*(xmin+xmax), 0)
+        efficiencyPlot.Fit(efficiencySigmoid)
+        
         efficiencyCanvas = rt.TCanvas('EfficiencyCanvas', '', 800, 600)
-        efficiencyPlot = scopeMeasurement.GetEfficiencyPlot(threshold=0.6)
         efficiencyPlot.Draw('AP')
+
+        root_style.labelFtm(efficiencyCanvas)
+        root_style.labelRight(efficiencyCanvas, 'FTM small-size')
+
+        infoText = rt.TPaveText(0.19, 0.73, 0.53, 0.91, 'BL NDC')
+        infoText.SetTextAlign(13)
+        #infoText.SetBorderSize(1)
+        infoText.SetTextSize(.03)
+        try:
+            foilType = scopeMeasurement.setup['FOIL']
+            infoText.AddText(f'{foilType} foil')
+        except KeyError: pass
+        try:
+            mixture = scopeMeasurement.setup['GAS']
+            infoText.AddText(f'Gas mixture {mixture}')
+        except KeyError: pass
+        try:
+            driftField = scopeMeasurement.setup['DRIFT']
+            infoText.AddText(f'Drift field {driftField} kV/cm')
+        except KeyError: pass
+        try:
+            sourceType = scopeMeasurement.setup['SOURCE']
+            infoText.AddText(f'{sourceType} source')
+        except KeyError: pass
+        infoText.Draw()
+
         efficiencyCanvas.SaveAs(f'{options.output}/Efficiency.eps')
         print('Efficiency plot saved.')
 
