@@ -19,6 +19,19 @@ class GainCurve:
 
     def GetGain(self, amplVoltage):
         return self.gainFit.Eval(amplVoltage)
+    
+class PrimaryCurrentCurve:
+    def __init__(self, path, gainCurve):
+        self.rootFile = rt.TFile(path)
+        self.currentGraph = self.rootFile.Get('Graph')
+        self.currentFit = self.currentGraph.GetFunction('powerScanFit')
+        self.gain = gainCurve.GetGain(300) # power scan is done at 300 V
+    
+    def ls(self):
+        self.rootFile.ls()
+
+    def GetPrimaryCurrent(self, sourcePower):
+        return self.currentFit.Eval(sourcePower)/self.gain
 
 class CurrentMeasurement:
     def __init__(self, currents, parameters=None, tstep=1):

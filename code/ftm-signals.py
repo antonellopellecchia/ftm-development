@@ -8,7 +8,7 @@ import argparse
 import time, datetime
 import re
 
-import scope
+import scope, femtoammeter
 from physlibs.root import root_style_ftm as root_style
 from physlibs.root import functions
 
@@ -19,15 +19,16 @@ def main():
     ap = argparse.ArgumentParser(add_help=True)
     ap.add_argument('--input')
     ap.add_argument('--output')
-    ap.add_argument('--inputFormat')    
-    ap.add_argument('--outputFormat')    
+    ap.add_argument('--inputFormat')
+    ap.add_argument('--outputFormat')
     ap.add_argument('--events', type=int, const=None)
     ap.add_argument('--chtrigger', type=int)
     ap.add_argument('--chdetector', type=int)
+    ap.add_argument('--gainCurve')
+    ap.add_argument('--primaryCurrent')
     ap.add_argument('--polarity')
     ap.add_argument('--setup')
     ap.add_argument('--draw')
-    ap.add_argument('--verbose', action='store_true')
     options = ap.parse_args(sys.argv[1:])
 
     options.input = options.input
@@ -41,6 +42,16 @@ def main():
 
     parameters = ['drift', 'anode', 'power']
     #threshold = 0.7
+
+    if options.gainCurve:
+        # use gain to find primary current
+        gainCurve = femtoammeter.GainCurve(options.gainCurve)
+        if options.primaryCurrent:
+            ''' use primary current scan to find primary charge
+            this method is independent of the signal amplitude
+            and should give you the same result if gain is the same
+            measured in signal mode and current mode '''
+            primaryCurrentCurve = femtoammeter.PrimaryCurrentCurve(options.primaryCurrent, gainCurve)
 
     if options.inputFormat=='raw':
         print('Input is raw...')
@@ -57,22 +68,50 @@ def main():
             scopeDataTaking.DrawWaveforms(f'{options.output}/{scopeDataTaking.name}', nevents=options.events)
     elif options.outputFormat=='results':
         print('Saving efficiency plot...')
-        efficiencyPlot = scopeMeasurement.GetEfficiencyPlot()
+        # save efficiency as function of primary charge if gain is available,
+        # instead as function of collected charge:
+        if options.primaryCurrent and options.gainCurve:
+            # if we have both, find primary charge from primary current:
+            efficiencyPlot = scopeMeasurement.GetEfficiencyPlotPrimaries(primaryCurrentCurve, calibration='current')
+        elif options.gainCurve:
+            # if we have only gain curve, find primary charge from signal:
+            efficiencyPlot = scopeMeasurement.GetEfficiencyPlotPrimaries(gainCurve, calibration='gain')
+        else: # otherwise do not try to calculate primary charge:
+            efficiencyPlot = scopeMeasurement.GetEfficiencyPlot()
 
         xmin, xmax = efficiencyPlot.GetXaxis().GetXmin(), efficiencyPlot.GetXaxis().GetXmax()
         efficiencySigmoid = functions.GetSigmoid(xmin, xmax, 1, 1, 0.5*(xmin+xmax), 0)
+        efficiencySigmoid.SetLineColor(rt.kGreen+2)
         efficiencyPlot.Fit(efficiencySigmoid)
         
         efficiencyCanvas = rt.TCanvas('EfficiencyCanvas', '', 800, 600)
         efficiencyPlot.Draw('AP')
 
+        efficiencyCanvas.Update()
+        efficiencyCanvas.Draw()
+        fitBox = efficiencyPlot.FindObject('stats')
+        fitBox.SetTextColor(rt.kGreen+2)
+        fitBox.SetLineColor(rt.kGreen+2)
+        fitBox.SetFillColor(0)
+        fitBox.SetFillStyle(1001)
+        fitBox.SetBorderSize(1)
+        x1,y1,x2,y2 = 0.6,0.15,0.9,0.35
+        fitBox.SetX1NDC(x1)
+        fitBox.SetY1NDC(y1)
+        fitBox.SetX2NDC(x2)
+        fitBox.SetY2NDC(y2)
+
         root_style.labelFtm(efficiencyCanvas)
         root_style.labelRight(efficiencyCanvas, 'FTM small-size')
 
-        infoText = rt.TPaveText(0.19, 0.73, 0.53, 0.91, 'BL NDC')
+        infoText = rt.TPaveText(0.19, 0.77, 0.5, 0.93, 'BL NDC')
+        infoText.SetFillColorAlpha(0, 0)
         infoText.SetTextAlign(13)
-        #infoText.SetBorderSize(1)
+        infoText.SetBorderSize(0)
         infoText.SetTextSize(.03)
+
+        print(scopeMeasurement.setup)
+        
         try:
             foilType = scopeMeasurement.setup['FOIL']
             infoText.AddText(f'{foilType} foil')
@@ -86,8 +125,8 @@ def main():
             infoText.AddText(f'Drift field {driftField} kV/cm')
         except KeyError: pass
         try:
-            sourceType = scopeMeasurement.setup['SOURCE']
-            infoText.AddText(f'{sourceType} source')
+            gain = scopeMeasurement.setup['AMPLIFICATION']
+            infoText.AddText(f'Gain {gainCurve.GetGain(gain)/1e4:1.1f} #times 10^{{4}}')
         except KeyError: pass
         infoText.Draw()
 

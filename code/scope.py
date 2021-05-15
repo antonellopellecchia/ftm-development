@@ -688,7 +688,24 @@ class Measurement:
             laserPower = float(dataTaking.setup['power'])*51/100*10**(-opticalDensity)
             averageCharge = dataTaking.GetAverageCharge()
             #efficiencyPlot.SetPoint(i, laserPower, dataTaking.GetEfficiency())
-            efficiencyPlot.SetPoint(i, dataTaking.GetAverageCharge(), dataTaking.GetEfficiency())
-        efficiencyPlot.SetTitle(';Collected charge (pC);Efficiency')
+            efficiencyPlot.SetPoint(i, averageCharge, dataTaking.GetEfficiency())
+        efficiencyPlot.SetTitle(';Collected charge (fC);Efficiency')
+        return efficiencyPlot
+
+    def GetEfficiencyPlotPrimaries(self, calibrationCurve, calibration='gain'):
+        efficiencyPlot = rt.TGraphErrors()
+        opticalDensity = float(self.setup['OD'])
+        for i,dataTaking in tqdm(enumerate(self)):
+            if calibration=='gain': # retrieve primary charge from gain curve
+                gain = calibrationCurve.GetGain(self.setup['AMPLIFICATION'])
+                averageCharge = dataTaking.GetAverageCharge() # in fC
+                primaryCharge = averageCharge/gain
+                primaryElectrons = primaryCharge*1e-15/1.6e-19
+            elif calibration=='current': # retrieve primary charge from primary current scan
+                laserPower = float(dataTaking.setup['power'])*51/100*10**(-opticalDensity)
+                primaryCharge = calibrationCurve.GetPrimaryCurrent(laserPower)/100
+                primaryElectrons = primaryCharge*1e-9/1.6e-19
+            efficiencyPlot.SetPoint(i, primaryElectrons, dataTaking.GetEfficiency())
+        efficiencyPlot.SetTitle(';Primary electrons;Efficiency')
 
         return efficiencyPlot
