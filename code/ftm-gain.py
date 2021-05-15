@@ -65,6 +65,7 @@ def main():
 
         powerScanCanvas = rt.TCanvas(f'PowerScanCanvas', '', 800, 600)
         powerScanGraph = powerScanCurrents.plot
+        powerScanGraph.SetName('Graph')
         powerScanGraph.SetTitle(f';Source power (#muJ);Ground current (nA)')
         powerScanGraph.GetYaxis().SetTitleOffset(1.6)
         powerScanGraph.Draw('ap')
@@ -78,6 +79,7 @@ def main():
         #root_style.labelFtm(powerScanCanvas)
         #if options.label: root_style.labelRight(powerScanCanvas, options.label)
         powerScanCanvas.SetGrid()
+        powerScanGraph.SaveAs(f'{options.out}/PowerScan.root')
         powerScanCanvas.SaveAs(f'{options.out}/PowerScan.eps')
 
     ''' Ground current vs amplification voltage scan '''
