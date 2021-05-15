@@ -8,6 +8,18 @@ import pandas as pd
 
 from physlibs.root import root_style_ftm
 
+class GainCurve:
+    def __init__(self, path):
+        self.rootFile = rt.TFile(path)
+        self.gainGraph = self.rootFile.Get('Graph')
+        self.gainFit = self.gainGraph.GetFunction('f')
+    
+    def ls(self):
+        self.rootFile.ls()
+
+    def GetGain(self, amplVoltage):
+        return self.gainFit.Eval(amplVoltage)
+
 class CurrentMeasurement:
     def __init__(self, currents, parameters=None, tstep=1):
         self.currents = currents
