@@ -30,7 +30,7 @@ class ScopeSignal:
         if x is None and y is None: self.scopeData = None
         else: self.scopeData = ScopeData(x, y*(-1)**negative)
         self.scopeImpedence = scopeImpedence
-        self.signalGraph = None
+        #self._graph = None
         self.noiseHisto = None
         self.negative = negative
     
@@ -54,7 +54,7 @@ class ScopeSignal:
     
     def __del__(self):
         try:
-            if self.signalGraph is not None: del self.signalGraph
+            if self._graph is not None: del self._graph
             if self.scopeData is not None: del self.scopeData
         except AttributeError: pass
 
@@ -79,6 +79,7 @@ class ScopeSignal:
     def ReadSignal(self):
         if self.scopeData is not None: return self.scopeData
         self.scopeData = lecroyparser.ScopeData(self.scopeFile, sparse = 10000)
+        self.x, self.y = np.array(self.x, dtype=float), np.array(self.y, dtype=float)
         self.x *= 1e9
         self.y *= 1e3
         if self.negative: self.y *= -1
@@ -91,29 +92,31 @@ class ScopeSignal:
             self.samplingTime = sum(deltax)/len(deltax) # sampling time in ns
         return self.samplingTime
     
-    def CreateGraph(self):
-        self.signalGraph = rt.TGraph(len(self.x), array('f', self.x), array('f', self.y))
-        self.signalGraph.SetTitle(';Time (ns);Amplitude (mV)')
-        return self.signalGraph
+    '''def CreateGraph(self):
+        self._graph = rt.TGraph(len(self.x), array('f', self.x), array('f', self.y))
+        self._graph.SetTitle(';Time (ns);Amplitude (mV)')
+        return self._graph'''
     
     def GetName(self):
         return self.scopeFile.split('/')[-1].replace('.trc', '')
     
     @property
     def graph(self, fcut=None, tstart=None, tend=None):
+        try: return self._graph
+        except AttributeError: pass
+        self._graph = rt.TGraph(len(self.x), self.x, self.y)
+        self._graph.SetTitle(';Time (ns);Amplitude (mV)')
+        return self._graph
         if fcut is not None: return self.GetFilteredGraph(fcut)
         if tstart is None and tend is None:
             if not self.scopeData: self.ReadSignal()
-            if not self.signalGraph: self.CreateGraph()
-            return self.signalGraph
+            if not self._graph: self.CreateGraph()
+            return self._graph
         x = self.x[self.x>tstart]
         y = self.y[self.x>tstart]
-        signalGraph = rt.TGraph(len(x), array('f', x), array('f', y))
-        signalGraph.SetTitle(';Time (ns);Amplitude (mV)')
-        return signalGraph
 
     def GetNoiseList(self, tmax=-5): # return list with points before tmax
-        return self.x[self.x<tmax]
+        return self.y[self.x<tmax]
 
     def GetNoiseHisto(self, tmax):
         if self.noiseHisto: return self.noiseHisto
@@ -142,7 +145,7 @@ class ScopeSignal:
         return self.GetChargeBetween()
 
     def GetChargeBetween(self, tLow=None, tHigh=None, fcut=0., baseline=0, findBaseline=True):
-        if findBaseline: baseline = self.GetBaseline()
+        if findBaseline: baseline = self.baseline
         if fcut>0: signalGraph = self.GetFilteredGraph(fcut)
         else: signalGraph = self.graph
         if tLow is None: tLow = self.x[0]
@@ -154,8 +157,10 @@ class ScopeSignal:
         if iHigh<=iLow: raise ValueError('tLow should be lower than tHigh')
         integral = 0
         for i in range(iLow, iHigh):
-            tdelta = signalGraph.GetPointX(i+1)-signalGraph.GetPointX(i)
-            ysum = signalGraph.GetPointY(i)-baseline+signalGraph.GetPointY(i+1)-baseline
+            '''tdelta = signalGraph.GetPointX(i+1)-signalGraph.GetPointX(i)
+            ysum = signalGraph.GetPointY(i)-baseline+signalGraph.GetPointY(i+1)-baseline'''
+            tdelta = self.x[i+1]-self.x[i]
+            ysum = self.y[i]-baseline+self.y[i+1]-baseline
             integral += 0.5*ysum*tdelta
         return integral/self.scopeImpedence
     
@@ -233,7 +238,7 @@ class ScopeSignal:
 
     def GetArrivalTimeBySigmoidFit(self, findStart=False, tstart=-2, fraction=0.2, fcut=None, status=False, returnChi2=False):
         #try: baseline = self.GetBaseline(self.x[-1]-10)
-        try: baseline = self.GetBaseline()
+        try: baseline = self.baseline
         except ValueError as e:
             if status: return 0, -1
             else: raise e
@@ -306,9 +311,14 @@ class ScopeSignal:
         #return self.GetNoiseHisto(tmax).GetRMS()
         return self.GetNoiseList(tmax).std()
 
-    def GetBaseline(self, tmax=-5):
+    @property
+    def baseline(self, tmax=-5):
+        try: return self._baseline
+        except AttributeError: pass
+        self._baseline = self.GetNoiseList(tmax).mean()
+        print(self._baseline, self.GetNoiseList(tmax))
+        return self._baseline
         #return self.GetNoiseHisto(tmax).GetMean()
-        return self.GetNoiseList(tmax).mean()
 
     def GetAmplitudeMax(self):
         return max(self.y)
@@ -500,19 +510,26 @@ class ScopeEvent:
             signalCanvas.cd(i+1)
             for j in [self.triggerSignals,self.detectorSignals][i]:
                 signal = self.signals[j]
+                #print(signal.graph, type(signal.graph))
                 multiGraphs[i].Add(signal.graph, 'l')
                 #print('Processing signal', j)
             multiGraphs[i].Draw('a')
 
-        line = rt.TLine(-200, self.threshold, 200, self.threshold)
-        line.SetLineColor(rt.kRed)
-        line.SetLineStyle(2)
-        line.Draw()
+        thresholdLine = rt.TLine(-200, self.threshold, 200, self.threshold)
+        thresholdLine.SetLineColor(rt.kRed)
+        thresholdLine.SetLineStyle(2)
+        thresholdLine.Draw()
+
+        baseLine = rt.TLine(-200, self.signals[-1].baseline, 200, self.signals[-1].baseline)
+        baseLine.SetLineColor(rt.kGreen)
+        baseLine.SetLineStyle(2)
+        baseLine.Draw()
 
         latex = rt.TLatex()
         latex.SetTextSize(0.03)
-        latex.DrawLatexNDC(.18, .85, f'Amplitude {self.detectorAmplitude:1.2f} mV')
-        latex.DrawLatexNDC(.18, .8, f'Charge {self.detectorCharge:1.2f} pC')
+        latex.DrawLatexNDC(.18, .87, f'Amplitude {self.detectorAmplitude:1.2f} mV')
+        latex.DrawLatexNDC(.18, .82, f'Charge {self.detectorCharge:1.2f} pC')
+        latex.DrawLatexNDC(.18, .77, f'Baseline {self.signals[-1].baseline:1.2f} mV')
 
         '''signalCanvas.cd(1)
         self.signals[0].graph.Draw('AL')
@@ -592,7 +609,7 @@ class DataTaking:
 
     @property
     def name(self):
-        return '_'.join(self.setup.values())
+        return '_'.join([ str(s) for s in self.setup.values()])
 
     def ToNtuples(self, path, events=-1):
         rootFile = rt.TFile(path, 'RECREATE')
@@ -609,7 +626,6 @@ class DataTaking:
             detectorCharge[0] = event.detectorCharge
             detectorAmplitude[0] = event.detectorAmplitude
             isOverThreshold[0] = event.isOverThreshold
-            #print(event.isOverThreshold)
             tree.Fill()
         
         rootFile.Write()
@@ -620,7 +636,6 @@ class DataTaking:
         except AttributeError: pass
         nevents = len(self)
         eventsOverThreshold = [ event for event in self if event.isOverThreshold ]
-        #for event in self: print(event.isOverThreshold)
         nsignals = len(eventsOverThreshold)
         self._efficiency = nsignals/nevents
         return self._efficiency
